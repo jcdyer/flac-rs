@@ -3,6 +3,7 @@ use std::{
     num::NonZeroU64,
 };
 
+use bitwriter::BitWriter;
 use bytes::BufMut;
 
 /// FLAC specifies a minimum block size of 16 and a maximum block size
@@ -13,7 +14,7 @@ pub struct BlockSize(u16);
 
 impl BlockSize {
     pub fn new(val: u16) -> Option<BlockSize> {
-        (val >= 16).then(||BlockSize(val))
+        (val >= 16).then(|| BlockSize(val))
     }
 
     pub fn inner(self) -> u16 {
@@ -42,7 +43,7 @@ pub struct SampleRate(u32);
 
 impl SampleRate {
     pub fn new(val: u32) -> Option<SampleRate> {
-        (val > 0 && val <=655350).then(|| SampleRate(val))
+        (val > 0 && val <= 655350).then(|| SampleRate(val))
     }
 
     pub fn inner(self) -> u32 {
@@ -130,27 +131,29 @@ pub struct MetadataBlockStreamInfo {
 }
 
 impl MetadataBlockStreamInfo {
-    pub fn put_into(&self, last_header: bool, mut buf: impl BufMut) {
+    pub fn put_into(
+        &self,
+        last_header: bool,
+        writer: &mut bitwriter::BitWriter,
+    ) {
         put_metadata_header(
             BLOCKTYPE_STREAMINFO,
             last_header,
             self.len() as u32,
-            &mut buf,
+            writer,
         );
-        buf.put_u16(self.min_block_size.inner()); // 2
-        buf.put_u16(self.max_block_size.inner()); // 2
-        put_u24(self.min_frame_size.inner(), &mut buf); // 3
-        put_u24(self.max_frame_size.inner(), &mut buf); // 3
-        let channels = self.channels as u8;
-        // TODO: Check this logic.
-        let packed = self.sample_rate.inner() << 12
-            | (channels as u32 - 1) << 9
-            | (self.bits_per_sample.inner() as u32) << 4
-            | (self.samples_in_stream.inner() >> 32) as u32 & 0xf; // bits 36..32
+        writer.put(16, self.min_block_size.inner());
+        writer.put(16, self.max_block_size.inner());
+        writer.put(24,self.min_frame_size.inner());
+        writer.put(24,self.max_frame_size.inner());
+        writer.put(20, self.sample_rate.inner());
+        writer.put(3, self.channels as u8 - 1);
+        writer.put(5, self.bits_per_sample.inner());
+        writer.put(36, self.samples_in_stream.inner());
 
-        buf.put_u32(packed);
-        buf.put_u32(self.samples_in_stream.inner() as u32); // least significant 32 bits
-        buf.put_u128(0); // To be filled with MD5 sum during stream finalization
+        // MD5 sum will be filled at end of processing.
+        writer.put(64, 0u64); // MD5 sum, high bits
+        writer.put(64, 0u64); // MD5 sum, low_bits
     }
 
     pub fn len(&self) -> usize {
@@ -185,16 +188,17 @@ impl MetadataBlockPadding {
         MetadataBlockPadding { count }
     }
 
-    pub fn put_into(&self, last_header: bool, mut buf: impl BufMut) {
-        put_metadata_header(BLOCKTYPE_PADDING, last_header, self.count, &mut buf);
-        const BATCH_SIZE: usize = 1024;
+    pub fn put_into(&self, last_header: bool, writer: &mut bitwriter::BitWriter) {
+        put_metadata_header(BLOCKTYPE_PADDING, last_header, self.count, writer);
+        const BATCH_SIZE: usize = 64;
+        let ct = self.count as usize;
         let zeros = [0; BATCH_SIZE];
         let mut written = 0;
-        while written < self.count as usize - BATCH_SIZE {
-            buf.put(&zeros[..]);
+        while written < ct - BATCH_SIZE {
+            writer.put(BATCH_SIZE, 0u64);
             written += BATCH_SIZE;
         }
-        buf.put(&zeros[..self.count as usize - written]);
+        writer.put(ct - written, 0u64);
     }
 
     pub fn len(&self) -> usize {
@@ -208,10 +212,10 @@ pub enum MetadataBlock {
 }
 
 impl MetadataBlock {
-    pub fn put_into(&self, last_header: bool, buf: impl BufMut) {
+    pub fn put_into(&self, last_header: bool,  writer: &mut BitWriter) {
         match self {
             MetadataBlock::SeekTable(seek_table) => todo!(),
-            MetadataBlock::Padding(padding) => padding.put_into(last_header, buf),
+            MetadataBlock::Padding(padding) => padding.put_into(last_header, writer),
         }
     }
 
@@ -232,16 +236,10 @@ const BLOCKTYPE_CUESHEET: u8 = 5;
 const BLOCKTYPE_PICTURE: u8 = 6;
 const BLOCKTYPE_INVALID: u8 = 127;
 
-fn put_metadata_header(block_type: u8, last_header: bool, len: u32, mut buf: impl BufMut) {
+fn put_metadata_header(block_type: u8, last_header: bool, len: u32, writer: &mut BitWriter) {
     assert_ne!(block_type, BLOCKTYPE_INVALID);
 
-    buf.put_u8(block_type | if last_header { 0x80 } else { 0 });
-    put_u24(len, &mut buf);
-}
-
-///
-fn put_u24(value: u32, mut buf: impl BufMut) {
-    assert_eq!(value & 0xff000000, 0, "value must fit in 24 bits");
-    buf.put_u8((value & 0xff0000 >> 16) as u8);
-    buf.put_u16((value & 0xffff) as u16);
+    writer.put(1, if last_header { 1u8 } else {0 });
+    writer.put(7, block_type);
+    writer.put(24, len);
 }

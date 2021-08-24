@@ -3,6 +3,13 @@
 version = 3
 
 [[package]]
+name = "bitwriter"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -30,6 +37,7 @@ dependencies = [
 name = "flac-rs"
 version = "0.1.0"
 dependencies = [
+ "bitwriter",
  "bytes",
  "md-5",
 ]

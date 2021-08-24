@@ -204,6 +204,12 @@ mod tests {
 
     #[test]
     fn test_ftf_encode_in_bounds() {
+        assert_eq!(&ftf8_encode(0), &[0]);
+        assert_eq!(&ftf8_encode(1), &[1]);
+        assert_eq!(&ftf8_encode(127), &[127]);
+        assert_eq!(&ftf8_encode(128), &[0xc2, 0x80]);
+        assert_eq!(&ftf8_encode(0x7ff), &[0xdf, 0xbf]);
+        assert_eq!(&ftf8_encode(0x800), &[0xe0, 0xa0, 0x80]);
         assert_eq!(
             &ftf8_encode((1 << 36) - 1),
             &[0xfe, 0xbf, 0xbf, 0xbf, 0xbf, 0xbf, 0xbf],

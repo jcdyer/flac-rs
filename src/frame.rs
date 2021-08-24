@@ -167,7 +167,6 @@ fn ftf8_encode(mut val: u64) -> Vec<u8> {
     if val < 128 {
         buffer[current] = val as u8;
     } else {
-
         while val >= 1 << bits_to_fill {
             buffer[current] = 0b1000_0000 | (val & 0b11_1111) as u8;
             val >>= 6;
@@ -177,9 +176,7 @@ fn ftf8_encode(mut val: u64) -> Vec<u8> {
             } else {
                 bits_to_fill -= 1;
             }
-            eprintln!("{} {:x?}", bits_to_fill, buffer);
         }
-        eprintln!("{}, {}, {:x?}", val, bits_to_fill, buffer);
         let prefix = match bits_to_fill {
             5 => 0b1100_0000,
             4 => 0b1110_0000,
@@ -187,7 +184,7 @@ fn ftf8_encode(mut val: u64) -> Vec<u8> {
             2 => 0b1111_1000,
             1 => 0b1111_1100,
             0 => 0b1111_1110,
-            _ => unreachable!("HI"),
+            _ => unreachable!(),
         };
         let mask = (1 << bits_to_fill) - 1;
         buffer[current] = prefix | (val & mask) as u8;

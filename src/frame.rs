@@ -61,9 +61,29 @@ impl<S: Sample> Frame<S> {
 
 pub enum Subframe<S> {
     Constant { value: S },
-    Verbatim { value: Vec<S> }, // Vec of len() == blocksize
+    Verbatim { value: Vec<S> }, // Vec with len() == blocksize
 }
 
+impl<S: Sample> Subframe<S> {
+    fn put_into(&self, w: &mut BitWriter) {
+        w.put(1, false); // Zero bit padding;
+        w.put(6, match self {
+            Subframe::Constant { .. } => 0b000000u8,
+            Subframe::Verbatim { .. } => 0b000001,
+        });
+        w.put(1, false); // Wasted bits in source.  Not sure what this is used for.  Assume none for now.
+
+        match self {
+            Subframe::Constant { value } => w.put(S::bitsize() as usize, *value),
+            Subframe::Verbatim { value } => {
+                for sample in value {
+                    w.put(S::bitsize() as usize, *sample);
+                }
+            },
+        }
+        todo!()
+    }
+}
 pub struct FrameHeader {
     block_id: BlockId,
     /// Size of the block in samples.  In a FixedStrategy block,
@@ -100,8 +120,8 @@ impl FrameHeader {
             _ => 0b0111,             // 16 bit, stored at end of header as x - 1
         };
         w.put(4, block_size_bits);
-        let sample_rate_bits = 0u8;
-        w.put(4, sample_rate_bits); // Read sample rate from STREAMINFO
+        let sample_rate_bits = 0u8;  // Read sample rate from STREAMINFO
+        w.put(4, sample_rate_bits);
         w.put(
             4,
             match channel_layout {
@@ -149,7 +169,7 @@ impl FrameHeader {
         todo!("UNFINISHED");
     }
 }
-pub trait Sample {
+pub trait Sample: Copy + Into<u64> {
     fn bitsize() -> u8;
 }
 
@@ -157,6 +177,13 @@ impl Sample for u16 {
     fn bitsize() -> u8 {
         16
     }
+}
+
+pub enum Subblock {
+    U16(Vec<u16>),
+    U8(Vec<u8>),
+    U24(Vec<u32>), // oof.
+    U32(Vec<u32>),
 }
 
 // FLAC-specific modified UTF-8 encoding for arbitrary number of bits.

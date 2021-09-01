@@ -91,7 +91,7 @@ impl<'a, const ORDER: usize> FixedResidual<'a, ORDER> {
         for i in 0..ORDER {
             let mut prev = 0;
             let mut next = iter.next().unwrap();
-            for j in 0..i+1 {
+            for j in 0..i + 1 {
                 next = next - prev;
                 prev = residuals[j];
                 residuals[j] = next;
@@ -99,10 +99,7 @@ impl<'a, const ORDER: usize> FixedResidual<'a, ORDER> {
         }
 
         println!("Initial residuals{:?}", residuals);
-        FixedResidual {
-            iter,
-            residuals,
-        }
+        FixedResidual { iter, residuals }
     }
 }
 
@@ -136,9 +133,11 @@ mod tests {
         for (slice, residual) in &[
             (&[0, 1, 2, 4, 7][..], &[1, 1, 2, 3][..]),
             (&[1, 2, 3, 4, 5, 6, 7], &[1, 1, 1, 1, 1, 1]),
-            (&[1, 2, 3, 3, 2, 1, 1, 2, 3, 3, 2, 1], &[1, 1, 0, -1, -1, 0, 1, 1, 0, -1, -1]),
-
-         ] {
+            (
+                &[1, 2, 3, 3, 2, 1, 1, 2, 3, 3, 2, 1],
+                &[1, 1, 0, -1, -1, 0, 1, 1, 0, -1, -1],
+            ),
+        ] {
             let fr = FixedResidual::<'_, 1>::new(slice);
             let result = fr.into_iter().collect::<Vec<_>>();
             assert_eq!(slice.len() - 1, result.len());
@@ -151,7 +150,10 @@ mod tests {
         for (slice, residual) in &[
             (&[0, 1, 2, 4, 7][..], &[0, 1, 1][..]),
             (&[1, 2, 3, 4, 5, 6, 7], &[0, 0, 0, 0, 0]),
-            (&[1, 2, 3, 3, 2, 1, 1, 2, 3, 3, 2, 1], &[0, -1, -1, 0, 1, 1, 0, -1, -1, 0]),
+            (
+                &[1, 2, 3, 3, 2, 1, 1, 2, 3, 3, 2, 1],
+                &[0, -1, -1, 0, 1, 1, 0, -1, -1, 0],
+            ),
         ] {
             let fr = FixedResidual::<'_, 2>::new(slice);
             let result = fr.into_iter().collect::<Vec<_>>();
@@ -165,7 +167,10 @@ mod tests {
         for (slice, residual) in &[
             (&[0, 1, 2, 4, 7][..], &[1, 0][..]),
             (&[1, 2, 3, 4, 5, 6, 7], &[0, 0, 0, 0]),
-            (&[1, 2, 3, 3, 2, 1, 1, 2, 3, 3, 2, 1], &[-1, 0, 1, 1, 0, -1, -1, 0, 1]),
+            (
+                &[1, 2, 3, 3, 2, 1, 1, 2, 3, 3, 2, 1],
+                &[-1, 0, 1, 1, 0, -1, -1, 0, 1],
+            ),
         ] {
             let fr = FixedResidual::<'_, 3>::new(slice);
             let result = fr.into_iter().collect::<Vec<_>>();
@@ -173,5 +178,4 @@ mod tests {
             assert_eq!(&result, residual);
         }
     }
-
 }

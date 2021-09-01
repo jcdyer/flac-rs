@@ -1,5 +1,8 @@
 /// The writer is responsible for turning structures into bytes in a file.
-use std::{io::{self, SeekFrom}, marker::PhantomData};
+use std::{
+    io::{self, SeekFrom},
+    marker::PhantomData,
+};
 
 use bitwriter::BitWriter;
 use md5::{Digest, Md5};
@@ -68,10 +71,9 @@ impl<W: io::Write> FrameWriter<W, i16> {
         self.w.write_all(&bytes)?;
         Ok(())
     }
-
 }
 
-impl <W: io::Write + io::Seek, S> FrameWriter<W, S> {
+impl<W: io::Write + io::Seek, S> FrameWriter<W, S> {
     /// Call at the very end to fill in metadata about information learned by encoding the file
     /// This includes the MD5 sum, seek table, etc.
     pub fn finish(&mut self) -> io::Result<()> {

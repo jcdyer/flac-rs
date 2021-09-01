@@ -1,7 +1,10 @@
 use bitwriter::BitWriter;
 use crc::{Algorithm, Crc};
 
-use crate::{BLOCK_SIZE, headers::{BitsPerSample, BlockSize, MetadataBlockStreamInfo}};
+use crate::{
+    headers::{BitsPerSample, BlockSize, MetadataBlockStreamInfo},
+    BLOCK_SIZE,
+};
 
 pub enum BlockId {
     FixedStrategy { frame_number: u64 },
@@ -85,7 +88,6 @@ static FRAME_CRC16: Crc<u16> = Crc::<u16>::new(&Algorithm {
     xorout: 0,
 });
 
-
 impl<S: Sample> Frame<S> {
     pub fn new(
         block_size: BlockSize,
@@ -135,7 +137,7 @@ pub enum Subframe<S> {
 
 impl Subframe<i16> {
     pub fn encode_subblock(subblock: Subblock) -> Option<Subframe<i16>> {
-        if let Subblock::I16(value) =  subblock {
+        if let Subblock::I16(value) = subblock {
             Some(Subframe::Verbatim { value })
         } else {
             None
@@ -182,8 +184,6 @@ pub struct FrameHeader {
     actual_block_size: u16,
     sample_rate: u32, // SampleRate
     bits_per_sample: BitsPerSample,
-
-
 }
 
 impl FrameHeader {
@@ -220,7 +220,10 @@ impl FrameHeader {
             176400 => 0,
             44100 => 0b1001,
             _ => {
-                eprintln!("warning: unexpected sample rate: {}.  Deferring to STREAM_INFO header", self.sample_rate);
+                eprintln!(
+                    "warning: unexpected sample rate: {}.  Deferring to STREAM_INFO header",
+                    self.sample_rate
+                );
                 0b0000
             }
         }; // Read sample rate from STREAMINFO
@@ -277,7 +280,7 @@ impl FrameHeader {
             w.put(16, self.sample_rate / 10);
         }
         w.flush(); // Flush before calculating digest
-        // TODO calculate this CRC as we go.
+                   // TODO calculate this CRC as we go.
         let mut digest = FRAME_HEADER_CRC8.digest();
         digest.update(&w.as_slice()[crc8_start..]);
         w.put(8, digest.finalize());
@@ -294,7 +297,7 @@ pub trait Sample: Copy {
 impl Sample for i16 {
     const BITSIZE: usize = 16;
     fn write(&self, slice: &mut [u8]) -> Option<()> {
-        if slice.len() < Self::BITSIZE / 8  {
+        if slice.len() < Self::BITSIZE / 8 {
             None
         } else {
             slice.copy_from_slice(&self.to_be_bytes());

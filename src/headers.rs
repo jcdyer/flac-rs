@@ -1,7 +1,5 @@
-use std::{
-    num::NonZeroU64,
-};
 use bitwriter::BitWriter;
+use std::num::NonZeroU64;
 
 /// FLAC specifies a minimum block size of 16 and a maximum block size
 /// of 65535, meaning the bit patterns corresponding to the numbers 0-15
@@ -146,21 +144,12 @@ pub struct MetadataBlockStreamInfo {
 }
 
 impl MetadataBlockStreamInfo {
-    pub fn put_into(
-        &self,
-        last_header: bool,
-        writer: &mut bitwriter::BitWriter,
-    ) {
-        put_metadata_header(
-            BLOCKTYPE_STREAMINFO,
-            last_header,
-            self.len() as u32,
-            writer,
-        );
+    pub fn put_into(&self, last_header: bool, writer: &mut bitwriter::BitWriter) {
+        put_metadata_header(BLOCKTYPE_STREAMINFO, last_header, self.len() as u32, writer);
         writer.put(16, self.min_block_size.inner());
         writer.put(16, self.max_block_size.inner());
-        writer.put(24,self.min_frame_size.inner());
-        writer.put(24,self.max_frame_size.inner());
+        writer.put(24, self.min_frame_size.inner());
+        writer.put(24, self.max_frame_size.inner());
         writer.put(20, self.sample_rate.inner());
         writer.put(3, self.channels as u8 - 1);
         writer.put(5, self.bits_per_sample.inner() - 1);
@@ -226,7 +215,7 @@ pub enum MetadataBlock {
 }
 
 impl MetadataBlock {
-    pub fn put_into(&self, last_header: bool,  writer: &mut BitWriter) {
+    pub fn put_into(&self, last_header: bool, writer: &mut BitWriter) {
         match self {
             MetadataBlock::SeekTable(_seek_table) => todo!(),
             MetadataBlock::Padding(padding) => padding.put_into(last_header, writer),
@@ -253,7 +242,7 @@ const BLOCKTYPE_INVALID: u8 = 127;
 fn put_metadata_header(block_type: u8, last_header: bool, len: u32, writer: &mut BitWriter) {
     assert_ne!(block_type, BLOCKTYPE_INVALID);
 
-    writer.put(1, if last_header { 1u8 } else {0 });
+    writer.put(1, if last_header { 1u8 } else { 0 });
     writer.put(7, block_type);
     writer.put(24, len);
 }

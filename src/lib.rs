@@ -1,5 +1,5 @@
-pub mod headers;
 pub mod encoder;
+pub mod headers;
 
 pub mod frame;
 mod writer;

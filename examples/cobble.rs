@@ -1,9 +1,13 @@
 use std::{convert::TryInto, iter::FromIterator, num::NonZeroU64, ops::Not};
 
-use flac_rs::{BLOCK_SIZE, HeaderWriter, frame::{ChannelLayout, Frame, Subblock, Subframe}, headers::{
+use flac_rs::{
+    frame::{ChannelLayout, Frame, Subblock, Subframe},
+    headers::{
         BitsPerSample, BlockSize, ChannelCount, FrameSize, MetadataBlockStreamInfo, SampleRate,
         SamplesInStream,
-    }};
+    },
+    HeaderWriter, BLOCK_SIZE,
+};
 
 use md5::Md5;
 
@@ -39,10 +43,11 @@ fn main() {
                 i = (i + 1) % stream_info.channels as u8 as usize;
             }
             Vec::from_iter(channels.into_iter().map(Subblock::I16))
-        })
-        ;
-    let writer: HeaderWriter<_, i16> =
-        HeaderWriter::new(std::fs::File::create("/tmp/out.flac").unwrap(), stream_info.clone());
+        });
+    let writer: HeaderWriter<_, i16> = HeaderWriter::new(
+        std::fs::File::create("/tmp/out.flac").unwrap(),
+        stream_info.clone(),
+    );
     let mut writer = writer
         .write_headers(std::iter::empty())
         .expect("writing headers");
@@ -56,7 +61,12 @@ fn main() {
             .collect();
         let layout = ChannelLayout::Independent { channels };
 
-        let mut frame = Frame::<i16>::new(BlockSize::new(block_size as u16).unwrap(), &stream_info, blocknum as u64 * BLOCK_SIZE as u64).expect("cannot create frame");
+        let mut frame = Frame::<i16>::new(
+            BlockSize::new(block_size as u16).unwrap(),
+            &stream_info,
+            blocknum as u64 * BLOCK_SIZE as u64,
+        )
+        .expect("cannot create frame");
         frame.set_subframes(layout);
         writer.write_frame(frame).expect("cannot write frame");
     }

@@ -68,18 +68,8 @@ fn to_mid_side(left: &Subblock, right: &Subblock) -> (Subblock, Subblock) {
     }
 }
 
-/// 1, 2, 3, 4, 5
-/// ORDER = 2
-/// new()
-/// for i in [1, 2];
-///   prev_es = [1, 0]  // e0(0), e(1)(0) (undefined)
-///   prev_es = [2, 1]  // e0(1), e(1)(1)
-/// next() Some(3)
-/// this = 3
-/// prev = 2
-/// es[0] = 3
-///   es = [3, 3 - 2 = 1] 1 - 1 =
-struct FixedResidual<'a, const ORDER: usize> {
+/// An iterator to calculate residuals over
+pub struct FixedResidual<'a, const ORDER: usize> {
     iter: std::iter::Copied<std::slice::Iter<'a, i16>>,
     residuals: [i16; ORDER],
 }
@@ -91,10 +81,10 @@ impl<'a, const ORDER: usize> FixedResidual<'a, ORDER> {
         for i in 0..ORDER {
             let mut prev = 0;
             let mut next = iter.next().unwrap();
-            for j in 0..i + 1 {
+            for residual in &mut residuals[..=i] {
                 next = next - prev;
-                prev = residuals[j];
-                residuals[j] = next;
+                prev = *residual;
+                *residual = next;
             }
         }
 
@@ -107,10 +97,10 @@ impl<'a, const ORDER: usize> Iterator for FixedResidual<'a, ORDER> {
     type Item = i16;
     fn next(&mut self) -> Option<Self::Item> {
         let mut next = self.iter.next()?;
-        for i in 0..ORDER {
+        for residual in &mut self.residuals {
             let val = next;
-            let residual_prev = self.residuals[i];
-            self.residuals[i] = val;
+            let residual_prev = *residual;
+            *residual = val;
             next = val - residual_prev;
         }
         Some(next)

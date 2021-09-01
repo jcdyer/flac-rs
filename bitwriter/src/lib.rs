@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use bytes::{BufMut, BytesMut};
 
 #[derive(Debug)]
@@ -27,6 +29,21 @@ impl BitWriter {
         }
     }
 
+    /// Zero pad to align the scratchptr to the next byte boundary,
+    /// and then put all the data from the slice.
+    pub fn put_slice(&mut self, mut slice: &[u8]) {
+        if self.scratchptr % 8 > 0 {
+            self.put(8 - self.scratchptr, 0u8);
+        }
+        while slice.len() > SCRATCH_SIZE / 8 {
+            self.put(SCRATCH_SIZE / 8, Scratch::from_be_bytes(slice[..SCRATCH_SIZE / 8].try_into().unwrap()));
+            slice = &slice[SCRATCH_SIZE / 8..];
+        }
+        for byte in slice {
+            self.put(8, *byte);
+        }
+    }
+
     pub fn put<T: Into<u64>>(&mut self, ct: usize, value: T) {
         let value = value.into();
         debug_assert!(self.scratchptr < SCRATCH_SIZE);
@@ -45,7 +62,11 @@ impl BitWriter {
         }
     }
 
-    fn flush(&mut self) {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.buf
+    }
+
+    pub fn flush(&mut self) {
         let to_write = self.scratchptr / 8;
         let remainder = self.scratchptr % 8;
         let mut bytes = self.scratch.to_be_bytes();

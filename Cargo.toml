@@ -5,7 +5,13 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[example]]
+name = "cobble"
+
 [dependencies]
 bytes = "1.0.1"
 md-5 = "0.9.1"
 bitwriter = { path = "./bitwriter" }
+wav = { version = "1.0.0"}
+# Need git version to handle CRC-8, missing in 2.0.0 release.
+crc = { version = "2.0.1-alpha.0", git = "https://github.com/mrhooray/crc-rs", commit = "747901f" }

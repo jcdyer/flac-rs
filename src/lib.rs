@@ -1,8 +1,9 @@
 pub mod headers;
 pub mod encoder;
 
-mod frame;
+pub mod frame;
 mod writer;
 
-pub use writer::HeaderWriter;
+pub use writer::{FrameWriter, HeaderWriter};
 
+pub const BLOCK_SIZE: u16 = 192;

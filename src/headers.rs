@@ -1,10 +1,7 @@
 use std::{
-    io::{self, Write},
     num::NonZeroU64,
 };
-
 use bitwriter::BitWriter;
-use bytes::BufMut;
 
 /// FLAC specifies a minimum block size of 16 and a maximum block size
 /// of 65535, meaning the bit patterns corresponding to the numbers 0-15
@@ -54,7 +51,7 @@ impl SampleRate {
 /// FLAC supports from 1 to 8 channels
 #[derive(Clone, Copy, Debug, Hash, Ord, Eq, PartialOrd, PartialEq)]
 #[repr(u8)]
-pub enum Channels {
+pub enum ChannelCount {
     One = 1,
     Two = 2,
     Three = 3,
@@ -65,6 +62,23 @@ pub enum Channels {
     Eight = 8,
 }
 
+impl ChannelCount {
+    pub fn new<U: Into<u64>>(ct: U) -> Option<ChannelCount> {
+        use ChannelCount::*;
+        let ct = ct.into();
+        match ct {
+            1 => Some(One),
+            2 => Some(Two),
+            3 => Some(Three),
+            4 => Some(Four),
+            5 => Some(Five),
+            6 => Some(Six),
+            7 => Some(Seven),
+            8 => Some(Eight),
+            _ => None,
+        }
+    }
+}
 /// FLAC supports from 4 to 32 bits per sample. Currently the
 /// reference encoder and decoders only support up to 24 bits
 /// per sample.
@@ -111,6 +125,7 @@ impl SamplesInStream {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MetadataBlockStreamInfo {
     pub min_block_size: BlockSize,
     pub max_block_size: BlockSize,
@@ -120,7 +135,7 @@ pub struct MetadataBlockStreamInfo {
 
     pub sample_rate: SampleRate,
     /// 3 bits.  Stored as number of channels - 1
-    pub channels: Channels,
+    pub channels: ChannelCount,
 
     // 5 bits. Stored as bits-per-sample - 1
     pub bits_per_sample: BitsPerSample,
@@ -148,7 +163,7 @@ impl MetadataBlockStreamInfo {
         writer.put(24,self.max_frame_size.inner());
         writer.put(20, self.sample_rate.inner());
         writer.put(3, self.channels as u8 - 1);
-        writer.put(5, self.bits_per_sample.inner());
+        writer.put(5, self.bits_per_sample.inner() - 1);
         writer.put(36, self.samples_in_stream.inner());
 
         // MD5 sum will be filled at end of processing.
@@ -192,7 +207,6 @@ impl MetadataBlockPadding {
         put_metadata_header(BLOCKTYPE_PADDING, last_header, self.count, writer);
         const BATCH_SIZE: usize = 64;
         let ct = self.count as usize;
-        let zeros = [0; BATCH_SIZE];
         let mut written = 0;
         while written < ct - BATCH_SIZE {
             writer.put(BATCH_SIZE, 0u64);
@@ -214,7 +228,7 @@ pub enum MetadataBlock {
 impl MetadataBlock {
     pub fn put_into(&self, last_header: bool,  writer: &mut BitWriter) {
         match self {
-            MetadataBlock::SeekTable(seek_table) => todo!(),
+            MetadataBlock::SeekTable(_seek_table) => todo!(),
             MetadataBlock::Padding(padding) => padding.put_into(last_header, writer),
         }
     }

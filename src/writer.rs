@@ -8,7 +8,7 @@ use bitwriter::BitWriter;
 use md5::{Digest, Md5};
 
 use crate::{
-    frame::{Frame, Sample},
+    frame::Frame,
     headers::{MetadataBlock, MetadataBlockStreamInfo},
 };
 
@@ -48,7 +48,6 @@ impl<W: std::io::Write, S> HeaderWriter<W, S> {
 
         Ok(FrameWriter {
             w: self.w,
-            stream_info: self.stream_info,
             md5: self.md5,
             _s: self._s,
         })
@@ -57,7 +56,6 @@ impl<W: std::io::Write, S> HeaderWriter<W, S> {
 
 pub struct FrameWriter<W, S> {
     w: W,
-    stream_info: MetadataBlockStreamInfo,
     md5: md5::Md5,
     _s: PhantomData<S>,
 }
@@ -78,7 +76,7 @@ impl<W: io::Write + io::Seek, S> FrameWriter<W, S> {
     /// This includes the MD5 sum, seek table, etc.
     pub fn finish(&mut self) -> io::Result<()> {
         self.w.seek(SeekFrom::Start(26))?; // Location of MD5 hash
-        let md5 = std::mem::take(&mut self.md5);
+        //let md5 = std::mem::take(&mut self.md5);
         //self.w.write_all(&md5.finalize()[..])?;
         Ok(())
     }

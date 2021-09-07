@@ -1,10 +1,7 @@
 use bitwriter::BitWriter;
 use crc::{Algorithm, Crc};
 
-use crate::{
-    headers::{BitsPerSample, BlockSize, MetadataBlockStreamInfo},
-    BLOCK_SIZE,
-};
+use crate::{encoder::FixedResidual, headers::{BitsPerSample, BlockSize, MetadataBlockStreamInfo}, rice::{RiceEncoder, rice}};
 
 pub enum BlockId {
     FixedStrategy { frame_number: u64 },
@@ -119,52 +116,16 @@ impl Frame<i16> {
     pub fn put_into(&self, w: &mut BitWriter) {
         w.flush();
         let crc16_start = w.as_slice().len();
-        let mut digest = FRAME_CRC16.digest();
         self.header.put_into(&self.subframes, w);
         for subframe in &self.subframes {
             subframe.put_into(w);
         }
-        w.flush();
-        digest.update(&w.as_slice()[crc16_start..]);
-        w.put(16, digest.finalize()); // CRC of whole frame.
+        w.align_and_flush(); // Flush and align?
+        let digest = FRAME_CRC16.checksum(&w.as_slice()[crc16_start..]);
+        w.put(16, digest); // CRC of whole frame.
     }
 }
 
-pub enum Subframe<S> {
-    Constant { value: S },
-    Verbatim { value: Vec<S> }, // Vec with len() == blocksize
-}
-
-impl Subframe<i16> {
-    pub fn encode_subblock(subblock: Subblock) -> Option<Subframe<i16>> {
-        if let Subblock::I16(value) = subblock {
-            Some(Subframe::Verbatim { value })
-        } else {
-            None
-        }
-    }
-
-    fn put_into(&self, w: &mut BitWriter) {
-        w.put(1, false); // Zero bit padding;
-        w.put(
-            6,
-            match self {
-                Subframe::Constant { .. } => 0b000000u8,
-                Subframe::Verbatim { .. } => 0b000001,
-            },
-        );
-        w.put(1, false); // Wasted bits in source.  Not sure what this is used for.  Assume none for now.
-
-        match self {
-            Subframe::Constant { value } => w.put(i16::bitsize() as usize, *value as u16),
-            Subframe::Verbatim { value } => {
-                for sample in value {
-                    w.put(i16::bitsize() as usize, *sample as u16);
-                }
-            }
-        }
-    }
-}
 
 static FRAME_HEADER_CRC8: Crc<u8> = Crc::<u8>::new(&Algorithm {
     check: 0,
@@ -190,10 +151,7 @@ impl FrameHeader {
     fn put_into<S: Sample>(&self, channel_layout: &ChannelLayout<S>, w: &mut BitWriter) {
         w.flush(); // Flush before getting start offset for CRC
         let crc8_start = w.as_slice().len();
-        let blocking_strategy_bit = match self.block_id {
-            BlockId::FixedStrategy { .. } => false,
-            BlockId::VariableStrategy { .. } => true,
-        };
+        let blocking_strategy_bit = matches!(self.block_id, BlockId::VariableStrategy{..});
         // Sync code + mandatory 0
         w.put(15, 0b111_1111_1111_1100_u16);
         w.put(1, blocking_strategy_bit);
@@ -216,8 +174,8 @@ impl FrameHeader {
         };
         w.put(4, block_size_bits);
         let sample_rate_bits = match self.sample_rate {
-            882000 => 0u8,
-            176400 => 0,
+            882000 => 0b0001u8,
+            176400 => 0b0010,
             44100 => 0b1001,
             _ => {
                 eprintln!(
@@ -242,7 +200,6 @@ impl FrameHeader {
                 ChannelLayout::MidSide { .. } => 10,
             },
         );
-        // Read sample size from STREAMINFO
         w.put(3, match self.bits_per_sample.inner() {
             8 => 0b001u8,
             12 => 0b010,
@@ -281,11 +238,130 @@ impl FrameHeader {
         }
         w.flush(); // Flush before calculating digest
                    // TODO calculate this CRC as we go.
-        let mut digest = FRAME_HEADER_CRC8.digest();
-        digest.update(&w.as_slice()[crc8_start..]);
-        w.put(8, digest.finalize());
+        let digest = FRAME_HEADER_CRC8.checksum(&w.as_slice()[crc8_start..]);
+        w.put(8, digest);
     }
 }
+
+#[derive(Debug)]
+pub enum Subframe<S> {
+    Constant {
+        value: S,
+    },
+    Verbatim {
+        value: Vec<S>,
+    }, // Vec with len() == blocksize
+    Fixed {
+        predictor: Vec<S>,
+        residual: Vec<i64>,
+    },
+}
+
+impl<S: Sample> Subframe<S> {
+    pub fn len(&self) -> usize {
+        1 + match self {
+            Subframe::Constant { .. } => S::bitsize() as usize / 8,
+            Subframe::Verbatim { value } => value.len(),
+            Subframe::Fixed {
+                ..
+            } => 23, // TODO: Set an actual size here or elsewhere?
+        }
+    }
+}
+
+impl Subframe<i16> {
+    pub fn encode_subblock(subblock: &Subblock) -> Option<Subframe<i16>> {
+        if let Subblock::I16(value) = subblock {
+            let val = value[0];
+            if value.iter().all(|sample| *sample == val) {
+                Some(Subframe::Constant { value: val })
+            } else {
+                let o1 = Subframe::Fixed {
+                    predictor: value[..1].to_owned(),
+                    residual: FixedResidual::<1>::new(value).map(i64::from).collect(),
+                };
+                let o2 = Subframe::Fixed {
+                    predictor: value[..2].to_owned(),
+                    residual: FixedResidual::<2>::new(value).map(i64::from).collect(),
+                };
+                let o3 = Subframe::Fixed {
+                    predictor: value[..3].to_owned(),
+                    residual: FixedResidual::<3>::new(value).map(i64::from).collect(),
+                };
+                let o4 = Subframe::Fixed {
+                    predictor: value[..4].to_owned(),
+                    residual: FixedResidual::<4>::new(value).map(i64::from).collect(),
+                };
+                let verbatim = Subframe::Verbatim { value: value.to_owned() };
+                // Arbitrary!
+                let mut subframe = o3;
+                for choice in [o2, o1, o4, verbatim] {
+                    if choice.len() < subframe.len() {
+                        subframe = choice;
+                    }
+                }
+                /*
+                match &subframe {
+                    Subframe::Constant { value } => eprintln!("constant {:?}", value),
+                    Subframe::Verbatim { .. } => eprintln!("verbatim"),
+                    Subframe::Fixed { predictor, .. } => eprintln!("fixed: {:?}", predictor),
+                }
+                */
+                Some(subframe)
+            }
+        } else {
+            // Only Subblock::I16 is implemented now.
+            None
+        }
+    }
+
+    fn put_into(&self, w: &mut BitWriter) {
+        w.put(1, false); // Zero bit padding;
+        w.put(
+            6,
+            match self {
+                Subframe::Constant { .. } => 0b000000u8,
+                Subframe::Verbatim { .. } => 0b000001,
+                Subframe::Fixed {
+                    predictor: samples, ..
+                } => 0b001000 | samples.len() as u8,
+            },
+        );
+        w.put(1, false); // Wasted bits in source.  Not sure what this is used for.  Assume none for now.
+
+        match self {
+            Subframe::Constant { value } => w.put(i16::bitsize() as usize, *value as u16),
+            Subframe::Verbatim { value } => {
+                for sample in value {
+                    w.put(i16::bitsize() as usize, *sample as u16);
+                }
+            }
+            Subframe::Fixed {
+                predictor,
+                residual,
+            } => {
+
+                for sample in predictor {
+                    w.put(i16::bitsize() as usize, *sample as u16);
+                }
+                self.put_residual(residual, w);
+            }
+        }
+    }
+
+    fn put_residual(&self, residual: &[i64], w: &mut BitWriter) {
+
+        let partition_order = 0u8; // TODO: Allow partitioning;
+        let rice_param = 12u64; // TODO: Calculate a reasonable rice parameter;
+        w.put(2, false); // Residual coding method: 4 bit rice parameter
+        w.put(4, partition_order);
+        w.put(4, rice_param);
+        for value in residual {
+            rice(rice_param as usize, *value, w);
+        }
+    }
+}
+
 pub trait Sample: Copy {
     const BITSIZE: usize;
     fn bitsize() -> u8 {

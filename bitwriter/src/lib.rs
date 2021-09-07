@@ -66,6 +66,12 @@ impl BitWriter {
         &self.buf
     }
 
+    pub fn align_and_flush(&mut self) {
+        let align_offset = (8 - self.scratchptr % 8) % 8;
+        self.put(align_offset, false);
+        self.flush();
+    }
+
     pub fn flush(&mut self) {
         let to_write = self.scratchptr / 8;
         let remainder = self.scratchptr % 8;
@@ -84,10 +90,7 @@ impl BitWriter {
     }
 
     pub fn finish(mut self) -> bytes::Bytes {
-        self.flush();
-        if self.scratchptr > 0 {
-            self.buf.put_u8(self.scratch.to_be_bytes()[0]);
-        }
+        self.align_and_flush();
         self.buf.freeze()
     }
 }

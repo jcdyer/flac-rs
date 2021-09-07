@@ -1,7 +1,12 @@
-use std::{convert::TryInto, iter::FromIterator, num::NonZeroU64, ops::Not};
+#![allow(
+    clippy::from_iter_instead_of_collect, // I like calling from_iter, damnit.
+)]
+
+use std::{convert::TryInto, fs::File, iter::FromIterator, num::NonZeroU64, ops::Not};
 
 use flac_rs::{
-    frame::{ChannelLayout, Frame, Subblock, Subframe},
+    encoder::Block,
+    frame::Subblock,
     headers::{
         BitsPerSample, BlockSize, ChannelCount, FrameSize, MetadataBlockStreamInfo, SampleRate,
         SamplesInStream,
@@ -17,6 +22,7 @@ fn main() {
     let mut wavfile = std::fs::File::open(wavfile).unwrap();
     let (wavheader, body) = wav::read(&mut wavfile).unwrap();
     let mut stream_info = streaminfo_from_wav(&wavheader).unwrap();
+
     stream_info.samples_in_stream = SamplesInStream::Count(
         NonZeroU64::new(
             match &body {
@@ -53,21 +59,10 @@ fn main() {
         .expect("writing headers");
     for (blocknum, block) in block_iter.enumerate() {
         debug_assert!(block.is_empty().not());
-        let block_size = block[0].len();
-        let channels = block
-            .into_iter()
-            .map(Subframe::encode_subblock)
-            .map(|opt| opt.expect("encode_subblock only handles I16 for now"))
-            .collect();
-        let layout = ChannelLayout::Independent { channels };
-
-        let mut frame = Frame::<i16>::new(
-            BlockSize::new(block_size as u16).unwrap(),
-            &stream_info,
-            blocknum as u64 * BLOCK_SIZE as u64,
-        )
-        .expect("cannot create frame");
-        frame.set_subframes(layout);
+        let block = Block::from_input(block);
+        let frame = block
+            .encode(&stream_info, blocknum as u64 * BLOCK_SIZE as u64)
+            .expect("cannot create frame");
         writer.write_frame(frame).expect("cannot write frame");
     }
 }

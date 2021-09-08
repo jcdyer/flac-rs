@@ -1,3 +1,5 @@
+use std::convert::{TryFrom,identity};
+
 use bitwriter::BitWriter;
 
 /// Rice encode a numeric value, putting the output in a bit stream.
@@ -31,17 +33,37 @@ pub fn rice(order: usize, value: i64, w: &mut BitWriter) {
     w.put(order, base); // Write the lower order bits in binary.
 }
 pub struct RiceEncoder {
-    order: usize,
+    param: usize,
 }
 
 impl RiceEncoder {
-    pub fn new(order: usize) -> RiceEncoder {
-        RiceEncoder { order }
+    pub fn new(param: usize) -> RiceEncoder {
+        RiceEncoder { param }
     }
 
     pub fn rice(&self, value: i64, w: &mut BitWriter) {
-        rice(self.order, value, w)
+        rice(self.param, value, w)
     }
+}
+
+pub fn find_optimum_rice_param(values: &[i64]) -> usize {
+    let mut least_param = 0;
+    let mut least_param_value = u64::MAX;
+    for param in 0..16 {
+        let overflow_len: u64 = values.iter()
+        .map(|&val| if val < 0 { -2 * val + 1 } else { 2 * val } as u64)
+        .map(|val| val >> param as u32)
+        .sum();
+        let value = ((param + 1) * values.len()) as u64 + overflow_len;
+        if value < least_param_value {
+            if overflow_len == 0 {
+                return param;
+            }
+            least_param_value = value;
+            least_param = param;
+        }
+    }
+    least_param
 }
 
 #[cfg(test)]

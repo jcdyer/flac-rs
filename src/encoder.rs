@@ -158,7 +158,7 @@ fn to_mid_side(left: &Subblock, right: &Subblock) -> (Subblock, Subblock) {
 /// An iterator to calculate residuals over
 pub struct FixedResidual<'a, const ORDER: usize> {
     iter: std::iter::Copied<std::slice::Iter<'a, i16>>,
-    residuals: [i32; ORDER],
+    residuals: [i64; ORDER],
 }
 
 impl<'a, const ORDER: usize> FixedResidual<'a, ORDER> {
@@ -166,8 +166,8 @@ impl<'a, const ORDER: usize> FixedResidual<'a, ORDER> {
         let mut iter = subblock.iter().copied();
         let mut residuals = [0; ORDER];
         for i in 0..ORDER {
-            let mut prev = 0i32;
-            let mut next = iter.next().unwrap() as i32;
+            let mut prev = 0;
+            let mut next = iter.next().unwrap() as i64;
             for residual in &mut residuals[..=i] {
                 next -= prev;
                 prev = *residual;
@@ -180,9 +180,9 @@ impl<'a, const ORDER: usize> FixedResidual<'a, ORDER> {
 }
 
 impl<'a, const ORDER: usize> Iterator for FixedResidual<'a, ORDER> {
-    type Item = i32;
+    type Item = i64;
     fn next(&mut self) -> Option<Self::Item> {
-        let mut next = self.iter.next()? as i32;
+        let mut next = self.iter.next()? as i64;
         for residual in &mut self.residuals {
             let val = next;
             let residual_prev = *residual;
@@ -267,21 +267,22 @@ mod tests {
         let slice = &[i16::MIN, i16::MAX, i16::MIN, i16::MAX][..];
         let mut fr = FixedResidual::<'_, 1>::new(slice);
 
-        assert_eq!(fr.next(), Some(i16::MAX as i32 - i16::MIN as i32));
-        assert_eq!(fr.next(), Some(-(i16::MAX as i32 - i16::MIN as i32)));
+        assert_eq!(fr.next(), Some(i16::MAX as i64 - i16::MIN as i64));
+        assert_eq!(fr.next(), Some(-(i16::MAX as i64 - i16::MIN as i64)));
 
         let slice = &[i16::MIN, i16::MIN, i16::MAX][..];
         let mut fr = FixedResidual::<'_, 2>::new(slice);
-        assert_eq!(fr.next(), Some(i16::MAX as i32 - i16::MIN as i32));
+        assert_eq!(fr.next(), Some(i16::MAX as i64 - i16::MIN as i64));
     }
 
     #[test]
     fn random_overflow_test() {
-        let mut min2 = i32::MAX;
-        let mut max2 = i32::MIN;
+        let mut min2 = i64::MAX;
+        let mut max2 = i64::MIN;
 
-        let mut min3 = i32::MAX;
-        let mut max3 = i32::MIN;
+        let mut min3 = i64::MAX;
+        let mut max3 = i64::MIN;
+
         for _ in 0..10000 {
             let arr: [i16; 12] = thread_rng().gen();
             let fr = FixedResidual::<'_, 2>::new(&arr[..]);
@@ -293,13 +294,13 @@ mod tests {
                     max2 = i;
                 }
                 assert!(
-                    i <= 4 * i16::MAX as i32 + 1,
+                    i <= 4 * i16::MAX as i64 + 1,
                     "ORDER 2 {:?} generated value {}",
                     arr,
                     i
                 );
                 assert!(
-                    i >= 4 * i16::MIN as i32,
+                    i >= 4 * i16::MIN as i64,
                     "ORDER 2 {:?} generated value {}",
                     arr,
                     i
@@ -315,28 +316,28 @@ mod tests {
                     max3 = i;
                 }
                 assert!(
-                    i <= 8 * (i16::MAX as i32 + 1),
+                    i <= 8 * (i16::MAX as i64 + 1),
                     "ORDER 3 residual {:?} generated value {}",
                     arr,
                     i
                 );
 
                 assert!(
-                    i >= 8 * i16::MIN as i32,
+                    i >= 8 * i16::MIN as i64,
                     "ORDER 3 residual {:?} generated value {}",
                     arr,
                     i
                 );
             }
         }
-        assert!(dbg!(min2) < 3*i16::MIN as i32);
-        assert!(dbg!(max2) > 3*i16::MAX as i32);
-        assert!(dbg!(max3) > 7* i16::MAX as i32);
-        assert!(dbg!(min3) < 7 * i16::MIN as i32);
+        assert!(dbg!(min2) < 3*i16::MIN as i64);
+        assert!(dbg!(max2) > 3*i16::MAX as i64);
+        assert!(dbg!(max3) > 7* i16::MAX as i64);
+        assert!(dbg!(min3) < 7 * i16::MIN as i64);
 
-        assert!(min2 >= 4*i16::MIN as i32);
-        assert!(min3 >= 8*i16::MIN as i32);
-        assert!(max2 <= 4*(1 + i16::MAX as i32));
-        assert!(max3 <= 8*(1 + i16::MAX as i32));
+        assert!(min2 >= 4*i16::MIN as i64);
+        assert!(min3 >= 8*i16::MIN as i64);
+        assert!(max2 <= 4*(1 + i16::MAX as i64));
+        assert!(max3 <= 8*(1 + i16::MAX as i64));
     }
 }

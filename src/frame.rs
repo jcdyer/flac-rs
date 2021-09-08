@@ -1,7 +1,7 @@
 use bitwriter::BitWriter;
 use crc::{Algorithm, Crc};
 
-use crate::{encoder::FixedResidual, headers::{BitsPerSample, BlockSize, MetadataBlockStreamInfo}, rice::{RiceEncoder, rice}};
+use crate::{BLOCK_SIZE, encoder::FixedResidual, headers::{BitsPerSample, BlockSize, MetadataBlockStreamInfo}, rice::{RiceEncoder, find_optimum_rice_param, rice}};
 
 pub enum BlockId {
     FixedStrategy { frame_number: u64 },
@@ -37,6 +37,7 @@ impl<'a, S> IntoIterator for &'a ChannelLayout<S> {
         }
     }
 }
+
 
 pub struct ChannelLayoutIter<'a, S> {
     layout: &'a ChannelLayout<S>,
@@ -258,18 +259,16 @@ pub enum Subframe<S> {
 }
 
 impl<S: Sample> Subframe<S> {
-    pub fn len(&self) -> usize {
-        1 + match self {
-            Subframe::Constant { .. } => S::bitsize() as usize / 8,
-            Subframe::Verbatim { value } => value.len(),
-            Subframe::Fixed {
-                ..
-            } => 23, // TODO: Set an actual size here or elsewhere?
-        }
-    }
 }
 
 impl Subframe<i16> {
+    // TODO: This forces a double encoding of all blocks.
+    pub fn len(&self) -> usize {
+        let mut scratch = BitWriter::with_capacity(BLOCK_SIZE as usize * i16::bitsize() as usize);
+        self.put_into(&mut scratch);
+        scratch.finish().len()
+    }
+
     pub fn encode_subblock(subblock: &Subblock) -> Option<Subframe<i16>> {
         if let Subblock::I16(value) = subblock {
             let val = value[0];
@@ -278,24 +277,24 @@ impl Subframe<i16> {
             } else {
                 let o1 = Subframe::Fixed {
                     predictor: value[..1].to_owned(),
-                    residual: FixedResidual::<1>::new(value).map(i64::from).collect(),
+                    residual: FixedResidual::<1>::new(value).collect(),
                 };
                 let o2 = Subframe::Fixed {
                     predictor: value[..2].to_owned(),
-                    residual: FixedResidual::<2>::new(value).map(i64::from).collect(),
+                    residual: FixedResidual::<2>::new(value).collect(),
                 };
                 let o3 = Subframe::Fixed {
                     predictor: value[..3].to_owned(),
-                    residual: FixedResidual::<3>::new(value).map(i64::from).collect(),
+                    residual: FixedResidual::<3>::new(value).collect(),
                 };
                 let o4 = Subframe::Fixed {
                     predictor: value[..4].to_owned(),
-                    residual: FixedResidual::<4>::new(value).map(i64::from).collect(),
+                    residual: FixedResidual::<4>::new(value).collect(),
                 };
                 let verbatim = Subframe::Verbatim { value: value.to_owned() };
                 // Arbitrary!
-                let mut subframe = o3;
-                for choice in [o2, o1, o4, verbatim] {
+                let mut subframe = o1;
+                for choice in [o2, o3, o4, verbatim] {
                     if choice.len() < subframe.len() {
                         subframe = choice;
                     }
@@ -352,12 +351,12 @@ impl Subframe<i16> {
     fn put_residual(&self, residual: &[i64], w: &mut BitWriter) {
 
         let partition_order = 0u8; // TODO: Allow partitioning;
-        let rice_param = 12u64; // TODO: Calculate a reasonable rice parameter;
+        let rice_param = find_optimum_rice_param(residual);
         w.put(2, false); // Residual coding method: 4 bit rice parameter
         w.put(4, partition_order);
-        w.put(4, rice_param);
+        w.put(4, rice_param as u64);
         for value in residual {
-            rice(rice_param as usize, *value, w);
+            rice(rice_param, *value, w);
         }
     }
 }

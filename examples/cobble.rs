@@ -2,7 +2,7 @@
     clippy::from_iter_instead_of_collect, // I like calling from_iter, damnit.
 )]
 
-use std::{convert::TryInto, fs::File, iter::FromIterator, num::NonZeroU64, ops::Not};
+use std::{convert::TryInto, iter::FromIterator, num::NonZeroU64, ops::Not};
 
 use flac_rs::{
     encoder::Block,
@@ -48,7 +48,7 @@ fn main() {
                 channels[i].push(*sample);
                 i = (i + 1) % stream_info.channels as u8 as usize;
             }
-            Vec::from_iter(channels.into_iter().map(Subblock::I16))
+            Vec::from_iter(channels.into_iter().map(|data| Subblock { data }))
         });
     let writer: HeaderWriter<_, i16> = HeaderWriter::new(
         std::fs::File::create("/tmp/out.flac").unwrap(),

@@ -1,4 +1,3 @@
-use std::convert::{TryFrom,identity};
 
 use bitwriter::BitWriter;
 
@@ -32,34 +31,26 @@ pub fn rice(order: usize, value: i64, w: &mut BitWriter) {
     w.put(overflow as usize + 1, true);
     w.put(order, base); // Write the lower order bits in binary.
 }
-pub struct RiceEncoder {
-    param: usize,
+
+pub fn get_rice_encoding_length(values: &[i64], param: usize) -> usize {
+    let overflow_len: usize  = values.iter()
+    .map(|&val| if val < 0 { -2 * val + 1 } else { 2 * val } as usize)
+    .map(|val| val >> param as u32)
+    .sum();
+    overflow_len + ((param + 1) * values.len())
 }
-
-impl RiceEncoder {
-    pub fn new(param: usize) -> RiceEncoder {
-        RiceEncoder { param }
-    }
-
-    pub fn rice(&self, value: i64, w: &mut BitWriter) {
-        rice(self.param, value, w)
-    }
-}
-
 pub fn find_optimum_rice_param(values: &[i64]) -> usize {
     let mut least_param = 0;
-    let mut least_param_value = u64::MAX;
+    let mut least_param_value = usize::MAX;
     for param in 0..16 {
-        let overflow_len: u64 = values.iter()
-        .map(|&val| if val < 0 { -2 * val + 1 } else { 2 * val } as u64)
-        .map(|val| val >> param as u32)
-        .sum();
-        let value = ((param + 1) * values.len()) as u64 + overflow_len;
-        if value < least_param_value {
-            if overflow_len == 0 {
-                return param;
-            }
-            least_param_value = value;
+        let length = get_rice_encoding_length(values, param);
+        if length == (param + 1) * values.len() {
+            // No overflow--Enlarging the base is not going to produce a shorter value.
+            // TODO: This might be when we should trigger the unencoded residual with param bits
+            return param;
+        }
+        if length < least_param_value {
+            least_param_value = length;
             least_param = param;
         }
     }
@@ -70,7 +61,7 @@ pub fn find_optimum_rice_param(values: &[i64]) -> usize {
 mod test {
     use bitwriter::BitWriter;
 
-    use super::RiceEncoder;
+    use super::rice;
 
     #[test]
     fn expected_sample() {
@@ -106,9 +97,8 @@ mod test {
             0x60, 0x60, 0x40, 0x31, 0x20, 0xe1, 0xc0,
         ];
         let mut bw = BitWriter::new();
-        let encoder = RiceEncoder::new(2);
         for value in input {
-            encoder.rice(*value, &mut bw);
+            rice(2, *value, &mut bw)
         }
         let bytes = bw.finish();
         assert_eq!(&bytes, expected_encoding);

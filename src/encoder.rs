@@ -113,7 +113,7 @@ impl<S: Sample> Block<S> {
         Some(frame)
     }
 
-    pub fn from_input(mut channels: Vec<Subblock<S>>) -> Block<S> {
+    pub fn from_input(channels: Vec<Subblock<S>>) -> Block<S> {
         assert!(channels.is_empty().not());
         assert!(channels.len() <= 8);
         if channels.len() == 2 {

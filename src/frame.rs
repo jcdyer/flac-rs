@@ -250,7 +250,7 @@ impl<S: Sample> Subframe<S> {
     }
 
     pub fn new_fixed_from_widened(value: &[S::Widened], order: usize) -> Option<Subframe<S>> {
-        let predictor = value[..order].into_iter().map(|&w| S::try_from_widened(w)).to_owned().collect::<Option<Vec<_>>>()?;
+        let predictor = value[..order].iter().map(|&w| S::try_from_widened(w)).to_owned().collect::<Option<Vec<_>>>()?;
         let residual: Vec<i64> = match order {
             1 => FixedResidual::<S::Widened, 1>::new(value).collect(),
             2 => FixedResidual::<S::Widened, 2>::new(value).collect(),
@@ -308,7 +308,7 @@ impl<S: Sample> Subframe<S> {
         let value = &subblock.data;
         let val = value[0];
         if false && value.iter().all(|sample| *sample == val) {
-            // This should probably only return 16 bit values for 16 bit streams
+            //T TODO: This should probably return 16 bit values?
             Some(Subframe::Constant { value: val })
         } else {
             let o1 = Subframe::new_fixed(value, 1);

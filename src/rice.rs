@@ -42,7 +42,7 @@ pub fn get_rice_encoding_length(values: &[i64], param: usize) -> usize {
 pub fn find_optimum_rice_param(values: &[i64]) -> usize {
     let mut least_param = 0;
     let mut least_param_value = usize::MAX;
-    for param in 0..16 {
+    for param in 0..8 {
         let length = get_rice_encoding_length(values, param);
         if length == (param + 1) * values.len() {
             // No overflow--Enlarging the base is not going to produce a shorter value.

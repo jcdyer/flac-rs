@@ -1,4 +1,7 @@
-use std::{convert::TryInto, ops::{Add, Deref, Shr, Sub}};
+use std::{
+    convert::{identity, TryInto},
+    ops::{Add, Deref, Shr, Sub},
+};
 
 use bitwriter::BitWriter;
 use crc::{Algorithm, Crc};
@@ -9,25 +12,26 @@ use crate::{
     rice::{find_optimum_rice_param, get_rice_encoding_length, rice},
 };
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Debug)]
 pub enum BlockId {
     FixedStrategy { frame_number: u64 },
     VariableStrategy { sample_number: u64 },
 }
 
-pub enum ChannelLayout<S: Sample> {
+pub enum ChannelLayout<S> {
     Independent {
         channels: Vec<Subframe<S>>,
     },
     MidSide {
         mid: Subframe<S>,
-        side: Subframe<S::Widened>,
+        side: Subframe<S>,
     },
     LeftSide {
         left: Subframe<S>,
-        side: Subframe<S::Widened>,
+        side: Subframe<S>,
     },
     SideRight {
-        side: Subframe<S::Widened>,
+        side: Subframe<S>,
         right: Subframe<S>,
     },
 }
@@ -73,7 +77,7 @@ impl<S: Sample> Frame<S> {
     }
 }
 
-impl Frame<i16> {
+impl<S: Sample + std::fmt::Debug> Frame<S> {
     pub fn put_into(&self, w: &mut BitWriter) {
         w.flush();
         let crc16_start = w.as_slice().len();
@@ -85,19 +89,29 @@ impl Frame<i16> {
                 }
             }
             ChannelLayout::MidSide { mid, side } => {
+                if let BlockId::FixedStrategy {frame_number } = self.header.block_id {
+                    if frame_number < 100 {
+                        println!("put into midside frame {:?}: \nmid:{:?}\nside: {:?}", self.header.block_id, mid ,side);
+                    }
+                }
                 mid.put_into(w);
                 side.put_into(w);
             }
             ChannelLayout::LeftSide { left, side } => {
                 left.put_into(w);
                 side.put_into(w);
-            },
+            }
             ChannelLayout::SideRight { side, right } => {
                 side.put_into(w);
                 right.put_into(w);
-            },
+            }
         }
         w.align_and_flush(); // Flush and align?
+        if let BlockId::FixedStrategy { frame_number} = self.header.block_id {
+            if frame_number == 3 {
+            println!("Written:{:?}", w);
+        }}
+
         let digest = FRAME_CRC16.checksum(&w.as_slice()[crc16_start..]);
         w.put(16, digest); // CRC of whole frame.
     }
@@ -250,7 +264,11 @@ impl<S: Sample> Subframe<S> {
     }
 
     pub fn new_fixed_from_widened(value: &[S::Widened], order: usize) -> Option<Subframe<S>> {
-        let predictor = value[..order].iter().map(|&w| S::try_from_widened(w)).to_owned().collect::<Option<Vec<_>>>()?;
+        let predictor = value[..order]
+            .iter()
+            .map(|&w| S::try_from_widened(w))
+            .to_owned()
+            .collect::<Option<Vec<_>>>()?;
         let residual: Vec<i64> = match order {
             1 => FixedResidual::<S::Widened, 1>::new(value).collect(),
             2 => FixedResidual::<S::Widened, 2>::new(value).collect(),
@@ -264,12 +282,54 @@ impl<S: Sample> Subframe<S> {
             residual,
             rice_param,
         })
-
     }
 }
 
-impl Subframe<i16> {
-    pub fn from_subblock_i16(value: &[i16]) -> Subframe<i16> {
+impl<S: Sample> Subframe<S> {
+    // Side channel cannot be encoded verbatim, and may be unencodable because necessary
+    // samples may not fit in the bitsize of the frame.
+    pub fn encode_side_channel(subblock: &Subblock<S::Widened>) -> Option<Subframe<S>> {
+        let value = &subblock.data;
+        let val = value[0];
+        
+        let constant = if value.iter().all(|sample| *sample == val) {
+            S::try_from_widened(val).map(|value| Subframe::Constant { value })
+        } else {
+             None
+        };
+
+        constant.or_else(|| {
+            let o1 = Subframe::<S>::new_fixed_from_widened(value, 1);
+            let o2 = Subframe::<S>::new_fixed_from_widened(value, 2);
+            let o3 = Subframe::<S>::new_fixed_from_widened(value, 3);
+            let o4 = Subframe::<S>::new_fixed_from_widened(value, 4);
+            std::array::IntoIter::new([o1, o2, o3, o4])
+                .filter_map(identity)
+                .min_by_key(|s| s.len())
+        })
+    }
+}
+
+impl<S: Sample> Subframe<S> {
+    pub fn len(&self) -> usize {
+        self.bitlen() / 8
+    }
+
+    pub fn bitlen(&self) -> usize {
+        8 + match self {
+            Subframe::Constant { .. } => S::bitsize() as usize,
+            Subframe::Verbatim { value }=> value.len() * S::bitsize() as usize,
+            Subframe::Fixed {
+                predictor,
+                residual,
+                rice_param
+            } => get_rice_encoding_length(residual, *rice_param)
+                + predictor.len() * S::bitsize() as usize
+        }
+    }
+
+    pub(crate) fn from_subblock(subblock: &Subblock<S>) -> Subframe<S> {
+        let value = &subblock.data;
         let val = value[0];
         if value.iter().all(|sample| *sample == val) {
             Subframe::Constant { value: val }
@@ -288,98 +348,9 @@ impl Subframe<i16> {
                     subframe = choice;
                 }
             }
-            /*
-            match &subframe {
-                Subframe::Constant { value } => eprintln!("constant {:?}", value),
-                Subframe::Verbatim { .. } => eprintln!("verbatim"),
-                Subframe::Fixed { predictor, .. } => eprintln!("fixed: {:?}", predictor),
-            }
-            */
             subframe
         }
     }
-}
-
-impl<S: Sample> Subframe<S> {
-    // Side channel cannot be encoded verbatim, because it does not generally fit in the
-    // bit size of the frame.
-    #[warn(clippy::logic_bug)]
-    pub fn encode_side_channel(subblock: &Subblock<S::Widened>) -> Option<Subframe<S::Widened>> {
-        let value = &subblock.data;
-        let val = value[0];
-        if false && value.iter().all(|sample| *sample == val) {
-            //T TODO: This should probably return 16 bit values?
-            Some(Subframe::Constant { value: val })
-        } else {
-            let o1 = Subframe::new_fixed(value, 1);
-            let o2 = Subframe::new_fixed(value, 2);
-            let o3 = Subframe::new_fixed(value, 3);
-            let o4 = Subframe::new_fixed(value, 4);
-
-            let mut subframe = o1;
-            for choice in [o2, o3, o4] {
-                if choice.len() < subframe.len() {
-                    subframe = choice;
-                }
-            }
-            /*
-            match &subframe {
-                Subframe::Constant { value } => eprintln!("constant {:?}", value),
-                Subframe::Verbatim { .. } => eprintln!("verbatim"),
-                Subframe::Fixed { predictor, .. } => eprintln!("fixed: {:?}", predictor),
-            }
-            */
-            Some(subframe)
-        }
-    }
-}
-
-impl<S: Sample> Subframe<S> {
-    pub fn len(&self) -> usize {
-        1 + match self {
-            Subframe::Constant { .. } => S::bitsize() as usize / 8,
-            Subframe::Verbatim { value } => value.len() * (S::bitsize() as usize / 8),
-            Subframe::Fixed {
-                predictor,
-                residual,
-                rice_param,
-            } => {
-                get_rice_encoding_length(residual, *rice_param)
-                    + predictor.len() * S::bitsize() as usize / 8
-            }
-        }
-    }
-    pub(crate) fn from_subblock(subblock: &Subblock<S>) -> Subframe<S> {
-        let value = &subblock.data;
-            let val = value[0];
-            if value.iter().all(|sample| *sample == val) {
-                Subframe::Constant { value: val }
-            } else {
-                let o1 = Subframe::new_fixed(value, 1);
-                let o2 = Subframe::new_fixed(value, 2);
-                let o3 = Subframe::new_fixed(value, 3);
-                let o4 = Subframe::new_fixed(value, 4);
-                let verbatim = Subframe::Verbatim {
-                    value: value.to_owned(),
-                };
-
-                let mut subframe = verbatim;
-                for choice in [o1, o2, o3, o4] {
-                    if choice.len() < subframe.len() {
-                        subframe = choice;
-                    }
-                }
-                /*
-                match &subframe {
-                    Subframe::Constant { value } => eprintln!("constant {:?}", value),
-                    Subframe::Verbatim { .. } => eprintln!("verbatim"),
-                    Subframe::Fixed { predictor, .. } => eprintln!("fixed: {:?}", predictor),
-                }
-                */
-                subframe
-            }
-    }
-
 }
 
 impl<S: Sample> Subframe<S> {
@@ -448,7 +419,9 @@ impl Deref for StackVec {
     }
 }
 
-pub trait Sample: Copy + PartialEq + Add<Output=Self> + Shr<i32, Output=Self> + Sub<Output=Self> {
+pub trait Sample:
+    Copy + PartialEq + Add<Output = Self> + Shr<i32, Output = Self> + Sub<Output = Self>
+{
     const BITSIZE: usize;
     type Widened: Sample;
 
@@ -481,7 +454,7 @@ impl Sample for i16 {
     fn widen(self) -> Self::Widened {
         self.into()
     }
-    fn try_from_widened(widened: Self::Widened) ->Option<Self> {
+    fn try_from_widened(widened: Self::Widened) -> Option<Self> {
         widened.try_into().ok()
     }
 }
@@ -501,10 +474,9 @@ impl Sample for i32 {
         self.into()
     }
 
-    fn try_from_widened(widened: Self::Widened) ->Option<Self> {
+    fn try_from_widened(widened: Self::Widened) -> Option<Self> {
         widened.try_into().ok()
     }
-
 }
 
 /// This only exists for widening side channel other sample types.  Widening this type will not work.
@@ -523,7 +495,7 @@ impl Sample for i64 {
         self
     }
 
-    fn try_from_widened(widened: Self::Widened) ->Option<Self> {
+    fn try_from_widened(widened: Self::Widened) -> Option<Self> {
         Some(widened)
     }
 }
@@ -532,7 +504,7 @@ pub struct Subblock<S> {
     pub data: Vec<S>,
 }
 
-impl<S>  Subblock<S> {
+impl<S> Subblock<S> {
     pub fn len(&self) -> usize {
         self.data.len()
     }

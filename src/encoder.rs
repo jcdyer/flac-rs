@@ -9,7 +9,8 @@ pub fn encode_subframe<S: Sample>(subblock: &Subblock<S>) -> Subframe<S> {
     Subframe::from_subblock(subblock)
 }
 
-pub enum Block<S: Sample> { // Side requires widened data
+pub enum Block<S: Sample> {
+    // Side requires widened data
     Stereo {
         left: Subblock<S>,
         right: Subblock<S>,
@@ -53,55 +54,19 @@ impl<S: Sample> Block<S> {
                 side,
             } => {
                 // Select the best two channels to represent stereo
-                let left_subframe =  Subframe::from_subblock(left);
-                let right_subframe =  Subframe::from_subblock(right);
+                let left_subframe = Subframe::from_subblock(left);
+                let right_subframe = Subframe::from_subblock(right);
                 let mid_subframe = Subframe::from_subblock(mid);
                 match Subframe::<S>::encode_side_channel(side) {
                     None => ChannelLayout::Independent {
                         channels: vec![left_subframe, right_subframe],
                     },
-                    Some(side_subframe) => {
-                        let side_len = side_subframe.len();
-                        let mut choices = [
-                            (
-                                left_subframe.len() + right_subframe.len(),
-                                ChannelKind::LeftRight,
-                            ),
-                            (
-                                mid_subframe.len() + side_len,
-                                ChannelKind::MidSide,
-                            ),
-                            (
-                                left_subframe.len() + side_len,
-                                ChannelKind::LeftSide,
-                            ),
-                            (
-                                side_len + right_subframe.len(),
-                                ChannelKind::SideRight,
-                            ),
-                        ];
-                        choices.sort();
-
-                        // UNWRAP SAFETY: side_subframe is checked above.
-                        let chosen_kind = choices[0].1;
-                        match chosen_kind {
-                            ChannelKind::LeftRight => ChannelLayout::Independent {
-                                channels: vec![left_subframe, right_subframe],
-                            },
-                            ChannelKind::LeftSide => ChannelLayout::LeftSide {
-                                left: left_subframe,
-                                side: side_subframe,
-                            },
-                            ChannelKind::SideRight => ChannelLayout::SideRight {
-                                side: side_subframe,
-                                right: right_subframe,
-                            },
-                            ChannelKind::MidSide => ChannelLayout::MidSide {
-                                mid: mid_subframe,
-                                side: side_subframe,
-                            },
-                        }
-                    }
+                    Some(side_subframe) => choose_stereo_layout(
+                        left_subframe,
+                        right_subframe,
+                        mid_subframe,
+                        side_subframe,
+                    ),
                 }
             }
 
@@ -133,17 +98,71 @@ impl<S: Sample> Block<S> {
     }
 }
 
-fn to_mid_side<S: Sample>(left: &Subblock<S>, right: &Subblock<S>) -> (Subblock<S>, Subblock<S::Widened>) {
+fn to_mid_side<S: Sample>(
+    left: &Subblock<S>,
+    right: &Subblock<S>,
+) -> (Subblock<S>, Subblock<S::Widened>) {
     assert_eq!(left.len(), right.len());
-    let (mvec, svec): (Vec<S>, Vec<S::Widened>) = left.data
+    let (mid_vec, side_vec): (Vec<S>, Vec<S::Widened>) = left
+        .data
         .iter()
         .zip(&right.data)
-        .map(|(l, r)| (S::try_from_widened((l.widen() + r.widen()) >> 1).unwrap(), l.widen() - r.widen()))
+        .map(|(l, r)| {
+            (
+                S::try_from_widened((l.widen() + r.widen()) >> 1).unwrap(),
+                l.widen() - r.widen(),
+            )
+        })
         .unzip();
-    (Subblock { data: mvec}, Subblock { data: svec })
+    (Subblock { data: mid_vec }, Subblock { data: side_vec })
 }
 
+// TODO: Figure out why mid/side channel encoding is broken
+static ALLOW_SIDE_CHANNEL: bool = false;
 
+fn choose_stereo_layout<S: Sample>(
+    left_subframe: Subframe<S>,
+    right_subframe: Subframe<S>,
+    mid_subframe: Subframe<S>,
+    side_subframe: Subframe<S>,
+) -> ChannelLayout<S> {
+    if ALLOW_SIDE_CHANNEL {
+        let side_len = side_subframe.len();
+        let mut choices = [
+            (
+                left_subframe.len() + right_subframe.len(),
+                ChannelKind::LeftRight,
+            ),
+            (mid_subframe.len() + side_len, ChannelKind::MidSide),
+            (left_subframe.len() + side_len, ChannelKind::LeftSide),
+            (side_len + right_subframe.len(), ChannelKind::SideRight),
+        ];
+        choices.sort();
+
+        let chosen_kind = choices[0].1;
+        match chosen_kind {
+            ChannelKind::LeftRight => ChannelLayout::Independent {
+                channels: vec![left_subframe, right_subframe],
+            },
+            ChannelKind::LeftSide => ChannelLayout::LeftSide {
+                left: left_subframe,
+                side: side_subframe,
+            },
+            ChannelKind::SideRight => ChannelLayout::SideRight {
+                side: side_subframe,
+                right: right_subframe,
+            },
+            ChannelKind::MidSide => ChannelLayout::MidSide {
+                mid: mid_subframe,
+                side: side_subframe,
+            },
+        }
+    } else {
+        ChannelLayout::Independent {
+            channels: vec![left_subframe, right_subframe],
+        }
+    }
+}
 
 /// An iterator to calculate residuals over
 pub struct FixedResidual<'a, S, const ORDER: usize> {
@@ -191,8 +210,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use rand::{thread_rng, Rng};
     use super::FixedResidual;
+    use rand::{thread_rng, Rng};
 
     #[test]
     fn order_zero() {

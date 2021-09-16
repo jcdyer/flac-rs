@@ -98,6 +98,9 @@ impl<S: Sample> Block<S> {
     }
 }
 
+// TODO: Figure out why mid/side channel encoding is broken
+static ALLOW_SIDE_CHANNEL: bool = false;
+
 fn to_mid_side<S: Sample>(
     left: &Subblock<S>,
     right: &Subblock<S>,
@@ -117,8 +120,14 @@ fn to_mid_side<S: Sample>(
     (Subblock { data: mid_vec }, Subblock { data: side_vec })
 }
 
-// TODO: Figure out why mid/side channel encoding is broken
-static ALLOW_SIDE_CHANNEL: bool = false;
+fn calculate_mid<S: Sample>(left: S, right: S) -> S {
+    // UNWRAP OK: The average of two values will be within the bitwidth of the original values.
+    S::try_from_widened((left.widen() + right.widen()) >> 1).unwrap()
+}
+
+fn calculate_side<S: Sample>(left: S, right: S) -> S::Widened {
+    left.widen() - right.widen()
+}
 
 fn choose_stereo_layout<S: Sample>(
     left_subframe: Subframe<S>,
@@ -212,6 +221,7 @@ where
 mod tests {
     use super::FixedResidual;
     use rand::{thread_rng, Rng};
+    use quickcheck_macros::quickcheck;
 
     #[test]
     fn order_zero() {
@@ -288,8 +298,30 @@ mod tests {
         assert_eq!(fr.next(), Some(i16::MAX as i64 - i16::MIN as i64));
     }
 
+    #[quickcheck]
+    fn residual_order_2_expected_range(data: Vec<i16>) -> bool {
+        const ORDER: usize = 2;
+        static MIN: i64 = 4 * i16::MIN as i64;
+        static MAX: i64 = 4 * i16::MAX as i64;
+
+        data.len() < ORDER || FixedResidual::<'_, i16, ORDER>::new(&data)
+            .all(|x| x > MIN && x < MAX)
+    }
+
+    #[quickcheck]
+    fn residual_order_3_expected_range(data: Vec<i16>) -> bool {
+        const ORDER: usize = 3;
+        static MIN: i64 = 8 * i16::MIN as i64;
+        static MAX: i64 = 8 * i16::MAX as i64;
+
+        data.len() < ORDER || FixedResidual::<'_, i16, ORDER>::new(&data)
+            .all(|x| x > MIN && x < MAX)
+    }
+
     #[test]
-    fn random_overflow_test() {
+    fn residual_expected_outliers() {
+        // A residual of random inputs *should* generate outputs up to
+        // inputmax * (order^2)
         let mut min2 = i64::MAX;
         let mut max2 = i64::MIN;
 
@@ -298,49 +330,24 @@ mod tests {
 
         for _ in 0..10000 {
             let arr: [i16; 12] = thread_rng().gen();
-            let fr = FixedResidual::<'_, i16, 2>::new(&arr[..]);
-            for i in fr {
+            let order_2_residual = FixedResidual::<'_, i16, 2>::new(&arr[..]);
+            for i in order_2_residual {
                 if i < min2 {
                     min2 = i;
                 }
                 if i > max2 {
                     max2 = i;
                 }
-                assert!(
-                    i <= 4 * i16::MAX as i64 + 1,
-                    "ORDER 2 {:?} generated value {}",
-                    arr,
-                    i
-                );
-                assert!(
-                    i >= 4 * i16::MIN as i64,
-                    "ORDER 2 {:?} generated value {}",
-                    arr,
-                    i
-                );
             }
 
-            let fr = FixedResidual::<'_, i16, 3>::new(&arr[..]);
-            for i in fr {
+            let order_3_residual = FixedResidual::<'_, i16, 3>::new(&arr[..]);
+            for i in order_3_residual {
                 if i < min3 {
                     min3 = i;
                 }
                 if i > max3 {
                     max3 = i;
                 }
-                assert!(
-                    i <= 8 * (i16::MAX as i64 + 1),
-                    "ORDER 3 residual {:?} generated value {}",
-                    arr,
-                    i
-                );
-
-                assert!(
-                    i >= 8 * i16::MIN as i64,
-                    "ORDER 3 residual {:?} generated value {}",
-                    arr,
-                    i
-                );
             }
         }
         assert!(dbg!(min2) < 3 * i16::MIN as i64);
@@ -352,5 +359,19 @@ mod tests {
         assert!(min3 >= 8 * i16::MIN as i64);
         assert!(max2 <= 4 * (1 + i16::MAX as i64));
         assert!(max3 <= 8 * (1 + i16::MAX as i64));
+    }
+
+    #[quickcheck]
+    fn mid_side_conversion(left: i16, right: i16) -> bool {
+        use super::{
+            calculate_mid,
+            calculate_side,
+        };
+        let mid = calculate_mid(left, right);
+        let side = calculate_side(left, right);
+
+        let right_reconstructed = mid - (side >> 1) as i16;
+        let left_reconstructed = (right_reconstructed as i32 + side) as i16;
+        left == left_reconstructed && right == right_reconstructed
     }
 }

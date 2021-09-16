@@ -1,5 +1,5 @@
 use bitwriter::BitWriter;
-use std::{ num::NonZeroU64};
+use std::num::NonZeroU64;
 
 /// FLAC specifies a minimum block size of 16 and a maximum block size
 /// of 65535, meaning the bit patterns corresponding to the numbers 0-15

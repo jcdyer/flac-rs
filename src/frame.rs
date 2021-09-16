@@ -89,9 +89,12 @@ impl<S: Sample + std::fmt::Debug> Frame<S> {
                 }
             }
             ChannelLayout::MidSide { mid, side } => {
-                if let BlockId::FixedStrategy {frame_number } = self.header.block_id {
+                if let BlockId::FixedStrategy { frame_number } = self.header.block_id {
                     if frame_number < 100 {
-                        println!("put into midside frame {:?}: \nmid:{:?}\nside: {:?}", self.header.block_id, mid ,side);
+                        println!(
+                            "put into midside frame {:?}: \nmid:{:?}\nside: {:?}",
+                            self.header.block_id, mid, side
+                        );
                     }
                 }
                 mid.put_into(w);
@@ -107,10 +110,11 @@ impl<S: Sample + std::fmt::Debug> Frame<S> {
             }
         }
         w.align_and_flush(); // Flush and align?
-        if let BlockId::FixedStrategy { frame_number} = self.header.block_id {
+        if let BlockId::FixedStrategy { frame_number } = self.header.block_id {
             if frame_number == 3 {
-            println!("Written:{:?}", w);
-        }}
+                println!("Written:{:?}", w);
+            }
+        }
 
         let digest = FRAME_CRC16.checksum(&w.as_slice()[crc16_start..]);
         w.put(16, digest); // CRC of whole frame.
@@ -291,11 +295,11 @@ impl<S: Sample> Subframe<S> {
     pub fn encode_side_channel(subblock: &Subblock<S::Widened>) -> Option<Subframe<S>> {
         let value = &subblock.data;
         let val = value[0];
-        
+
         let constant = if value.iter().all(|sample| *sample == val) {
             S::try_from_widened(val).map(|value| Subframe::Constant { value })
         } else {
-             None
+            None
         };
 
         constant.or_else(|| {
@@ -318,13 +322,15 @@ impl<S: Sample> Subframe<S> {
     pub fn bitlen(&self) -> usize {
         8 + match self {
             Subframe::Constant { .. } => S::bitsize() as usize,
-            Subframe::Verbatim { value }=> value.len() * S::bitsize() as usize,
+            Subframe::Verbatim { value } => value.len() * S::bitsize() as usize,
             Subframe::Fixed {
                 predictor,
                 residual,
-                rice_param
-            } => get_rice_encoding_length(residual, *rice_param)
-                + predictor.len() * S::bitsize() as usize
+                rice_param,
+            } => {
+                get_rice_encoding_length(residual, *rice_param)
+                    + predictor.len() * S::bitsize() as usize
+            }
         }
     }
 

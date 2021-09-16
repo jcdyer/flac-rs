@@ -6,8 +6,8 @@ pub mod encoder;
 pub mod headers;
 
 pub mod frame;
-mod writer;
 pub mod rice;
+mod writer;
 pub use writer::{FrameWriter, HeaderWriter};
 
 pub const SMALL: bool = true;

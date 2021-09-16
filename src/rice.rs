@@ -1,4 +1,3 @@
-
 use bitwriter::BitWriter;
 
 /// Rice encode a numeric value, putting the output in a bit stream.
@@ -33,28 +32,31 @@ pub fn rice(order: usize, value: i64, w: &mut BitWriter) {
 }
 
 pub fn get_rice_encoding_length(values: &[i64], param: usize) -> usize {
-    let overflow_len: usize  = values.iter()
-    .map(|&val| if val < 0 { -2 * val + 1 } else { 2 * val } as usize)
-    .map(|val| val >> param as u32)
-    .sum();
+    let overflow_len: usize = values
+        .iter()
+        .map(|&val| if val < 0 { -2 * val + 1 } else { 2 * val } as usize)
+        .map(|val| val >> param as u32)
+        .sum();
+
     overflow_len + ((param + 1) * values.len())
 }
+
 pub fn find_optimum_rice_param(values: &[i64]) -> usize {
     let mut least_param = 0;
     let mut least_param_value = usize::MAX;
     for param in 0..8 {
         let length = get_rice_encoding_length(values, param);
-        if length == (param + 1) * values.len() {
-            // No overflow--Enlarging the base is not going to produce a shorter value.
-            // TODO: This might be when we should trigger the unencoded residual with param bits
-            return param;
-        }
         if length < least_param_value {
+            if length == (param + 1) * values.len() {
+                // No overflow--Enlarging the base is not going to produce a shorter value.
+                // TODO: This might be when we should trigger the unencoded residual with param bits
+                return param;
+            }
             least_param_value = length;
             least_param = param;
         }
     }
-    least_param
+    dbg!(least_param)
 }
 
 #[cfg(test)]
@@ -65,7 +67,6 @@ mod test {
 
     #[test]
     fn expected_sample() {
-
         let input: &[i64] = &[
             -5, 3, 1, -3, 6, -7, -4, 3, -2, 5, -10, 2, 2, -1, 10, 6, -2, 2, -4, 0, 3, -3, -3, -6,
             -4, 0, -1, 6, 3, 5, 8, 1, 3, 0, -3, -12, 0, -5, -1, -11, 2, -6, -2, 6, -1, 5, 7, 4, 13,

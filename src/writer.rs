@@ -6,7 +6,6 @@ use std::{
 
 use bitwriter::BitWriter;
 
-
 use crate::{
     frame::Frame,
     headers::{MetadataBlock, MetadataBlockStreamInfo},
@@ -76,8 +75,8 @@ impl<W: io::Write + io::Seek, S> FrameWriter<W, S> {
     /// This includes the MD5 sum, seek table, etc.
     pub fn finish(&mut self) -> io::Result<()> {
         self.w.seek(SeekFrom::Start(26))?; // Location of MD5 hash
-        //let md5 = std::mem::take(&mut self.md5);
-        //self.w.write_all(&md5.finalize()[..])?;
+                                           //let md5 = std::mem::take(&mut self.md5);
+                                           //self.w.write_all(&md5.finalize()[..])?;
         Ok(())
     }
 }
